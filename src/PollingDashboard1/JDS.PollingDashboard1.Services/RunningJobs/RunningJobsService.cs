@@ -1,0 +1,126 @@
+﻿// Copyright (c) 2026 Jacobs Data Solutions, LLC
+// Licensed under the MIT License. See LICENSE file in the project root.
+
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
+using JDS.PollingDashboard1.Abstractions.Clock;
+using JDS.PollingDashboard1.Abstractions.RunningJobs;
+using Microsoft.Extensions.Caching.Distributed;
+
+namespace JDS.PollingDashboard1.Services.RunningJobs;
+
+internal sealed class RunningJobsService : IRunningJobsService
+{
+    private const string CacheKey = "running-jobs:v1";
+
+    private readonly IDistributedCache _cache;
+    private readonly JsonSerializerOptions _jsonSerializerOptions;
+    private readonly DistributedCacheEntryOptions _distributedCacheEntryOptions;
+    private readonly IDateTimeService _dateTimeService;
+
+    private readonly SemaphoreSlim _semaphore = new(1, 1);
+
+    public RunningJobsService(IDistributedCache cache, JsonSerializerOptions jsonSerializerOptions, IDateTimeService dateTimeService, TimeSpan? ttl = null)
+    {
+        ArgumentNullException.ThrowIfNull(cache, nameof(cache));
+        ArgumentNullException.ThrowIfNull(jsonSerializerOptions, nameof(jsonSerializerOptions));
+        ArgumentNullException.ThrowIfNull(dateTimeService, nameof(dateTimeService));
+        _cache = cache;
+        _jsonSerializerOptions = jsonSerializerOptions;
+        _dateTimeService = dateTimeService;
+        _distributedCacheEntryOptions = new()
+        {
+            AbsoluteExpirationRelativeToNow = ttl ?? TimeSpan.FromMinutes(30)
+        };
+    }
+
+    public async Task<AttemptRetryResult> AttemptJobRunAsync(Guid jobId, CancellationToken cancellationToken = default)
+    {
+        DateTime kickedOffUtc = DateTime.UtcNow;
+        await _semaphore.WaitAsync(cancellationToken);
+        try
+        {
+            Dictionary<Guid, DateTime> runningJobMap = await GetRunningJobMapFromCacheAsync(cancellationToken);
+            if (runningJobMap.TryGetValue(jobId, out DateTime runningSinceUtc))
+            {
+                return new(false, runningSinceUtc);
+            }
+            runningJobMap[jobId] = kickedOffUtc;
+            await WriteRunningJobMapToCacheAsync(runningJobMap, cancellationToken);
+            return new(true, null);
+        }
+        finally
+        {
+            _semaphore.Release();
+        }
+    }
+
+    public async Task ClearJobRunningAsync(Guid jobId, CancellationToken cancellationToken = default)
+    {
+        await _semaphore.WaitAsync(cancellationToken);
+        try
+        {
+            Dictionary<Guid, DateTime> runningJobMap = await GetRunningJobMapFromCacheAsync(cancellationToken);
+            if (!runningJobMap.Remove(jobId))
+            {
+                return;
+            }
+            if (runningJobMap.Count == 0)
+            {
+                await _cache.RemoveAsync(CacheKey, cancellationToken);
+                return;
+            }
+            await WriteRunningJobMapToCacheAsync(runningJobMap, cancellationToken);
+        }
+        finally
+        {
+            _semaphore.Release();
+        }
+    }
+
+    public async Task<RunningJobsList> GetRunningJobsListAsync(CancellationToken cancellationToken = default)
+    {
+        await _semaphore.WaitAsync(cancellationToken);
+        try
+        {
+            Dictionary<Guid, DateTime> runningJobMap = await GetRunningJobMapFromCacheAsync(cancellationToken);
+            RunningJob[] jobs =
+                runningJobMap
+                .OrderBy(job => job.Key)
+                .Select(job => new RunningJob(job.Key, job.Value))
+                .ToArray();
+            string eTagSource = string.Join("|", from j in jobs select $"{j.JobId}:{j.KickedOffUtc.Ticks}");
+            string eTag = ComputeStrongETag(eTagSource);
+            return new(jobs, eTag, _dateTimeService.UtcNow);
+        }
+        finally
+        {
+            _semaphore.Release();
+        }
+    }
+
+    private async Task<Dictionary<Guid, DateTime>> GetRunningJobMapFromCacheAsync(CancellationToken cancellationToken = default)
+    {
+        byte[]? bytes = await _cache.GetAsync(CacheKey, cancellationToken);
+        if (bytes is null || bytes.Length == 0)
+        {
+            return new();
+        }
+        Dictionary<Guid, DateTime>? runningJobMap = JsonSerializer.Deserialize<Dictionary<Guid, DateTime>>(bytes, _jsonSerializerOptions);
+        return runningJobMap ?? new();
+    }
+
+    private async Task WriteRunningJobMapToCacheAsync(Dictionary<Guid, DateTime> runningJobMap, CancellationToken cancellationToken = default)
+    {
+        byte[] bytes = JsonSerializer.SerializeToUtf8Bytes(runningJobMap, _jsonSerializerOptions);
+        await _cache.SetAsync(CacheKey, bytes, _distributedCacheEntryOptions, cancellationToken);
+    }
+
+    private static string ComputeStrongETag(string eTagSource)
+    {
+        byte[] hash = SHA256.HashData(Encoding.UTF8.GetBytes(eTagSource));
+        string hex = Convert.ToHexString(hash);
+        return $"\"{hex}\"";
+    }
+}

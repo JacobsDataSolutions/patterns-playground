@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/Solution Items/">
+    <File Path="../.editorconfig" />
+    <File Path="Directory.Build.props" />
+    <File Path="Directory.Packages.props" />
+    <File Path="exclusion.dic" />
+  </Folder>
+  <Project Path="JDS.PollingDashboard1.Abstractions/JDS.PollingDashboard1.Abstractions.csproj" />
+  <Project Path="JDS.PollingDashboard1.Services/JDS.PollingDashboard1.Services.csproj" />
+  <Project Path="JDS.PollingDashboard1.WebApi/JDS.PollingDashboard1.WebApi.csproj" />
+</Solution>
