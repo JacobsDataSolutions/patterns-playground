@@ -1,9 +1,9 @@
 ﻿// Copyright (c) 2026 Jacobs Data Solutions, LLC
 // Licensed under the MIT License. See LICENSE file in the project root.
 
-using JDS.PollingDashboard1.Abstractions.RunningJobs;
+using JDS.PollingDashboard1.Abstractions.Jobs;
 
-namespace JDS.PollingDashboard1.WebApi.RunningJobs;
+namespace JDS.PollingDashboard1.WebApi.Jobs;
 
 public sealed class RunningJobsDto
 {

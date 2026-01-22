@@ -4,15 +4,19 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using Bogus;
 using JDS.PollingDashboard1.Abstractions.Clock;
-using JDS.PollingDashboard1.Abstractions.RunningJobs;
+using JDS.PollingDashboard1.Abstractions.Jobs;
 using Microsoft.Extensions.Caching.Distributed;
 
-namespace JDS.PollingDashboard1.Services.RunningJobs;
+namespace JDS.PollingDashboard1.Services.Jobs;
 
-internal sealed class RunningJobsService : IRunningJobsService
+internal sealed class JobsService : IJobsService, IDisposable
 {
     private const string CacheKey = "running-jobs:v1";
+
+    private static readonly Random _random = new();
+    private static readonly Faker _faker = new();
 
     private readonly IDistributedCache _cache;
     private readonly JsonSerializerOptions _jsonSerializerOptions;
@@ -20,8 +24,9 @@ internal sealed class RunningJobsService : IRunningJobsService
     private readonly IDateTimeService _dateTimeService;
 
     private readonly SemaphoreSlim _semaphore = new(1, 1);
+    private bool isDisposed;
 
-    public RunningJobsService(IDistributedCache cache, JsonSerializerOptions jsonSerializerOptions, IDateTimeService dateTimeService, TimeSpan? ttl = null)
+    public JobsService(IDistributedCache cache, JsonSerializerOptions jsonSerializerOptions, IDateTimeService dateTimeService, TimeSpan? ttl = null)
     {
         ArgumentNullException.ThrowIfNull(cache, nameof(cache));
         ArgumentNullException.ThrowIfNull(jsonSerializerOptions, nameof(jsonSerializerOptions));
@@ -33,6 +38,19 @@ internal sealed class RunningJobsService : IRunningJobsService
         {
             AbsoluteExpirationRelativeToNow = ttl ?? TimeSpan.FromMinutes(30)
         };
+    }
+
+    public async Task<IReadOnlyList<Job>> GetJobs(CancellationToken cancellationToken = default)
+    {
+        int numJobs = _random.Next(25, 50);
+        return [.. from _ in Enumerable.Range(0, numJobs) select new Job(Guid.NewGuid(), string.Join(" ", $"{_faker.Lorem.Sentence(_random.Next(3, 5))}"))];
+    }
+
+    public async Task RunJobAsync(Guid jobId, CancellationToken cancellationToken = default)
+    {
+        // Simulate long-running job.
+        int runtime = _random.Next(10, 30) * 1000;
+        await Task.Delay(runtime, cancellationToken);
     }
 
     public async Task<AttemptRetryResult> AttemptJobRunAsync(Guid jobId, CancellationToken cancellationToken = default)
@@ -122,5 +140,25 @@ internal sealed class RunningJobsService : IRunningJobsService
         byte[] hash = SHA256.HashData(Encoding.UTF8.GetBytes(eTagSource));
         string hex = Convert.ToHexString(hash);
         return $"\"{hex}\"";
+    }
+
+    private void Dispose(bool disposing)
+    {
+        if (!isDisposed)
+        {
+            if (disposing)
+            {
+                _semaphore.Dispose();
+            }
+
+            isDisposed = true;
+        }
+    }
+
+    void IDisposable.Dispose()
+    {
+        // Do not change this code. Put cleanup code in 'Dispose(bool disposing)' method
+        Dispose(disposing: true);
+        GC.SuppressFinalize(this);
     }
 }

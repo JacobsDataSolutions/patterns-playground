@@ -1,33 +1,29 @@
 ﻿// Copyright (c) 2026 Jacobs Data Solutions, LLC
 // Licensed under the MIT License. See LICENSE file in the project root.
 
-using Bogus;
 using System.Net;
-using JDS.PollingDashboard1.Abstractions.RunningJobs;
+using JDS.PollingDashboard1.Abstractions.Jobs;
 
-namespace JDS.PollingDashboard1.WebApi.RunningJobs;
+namespace JDS.PollingDashboard1.WebApi.Jobs;
 
-public static class RunningJobsEndpoints
+public static class JobsEndpoints
 {
-    private static readonly Random _random = new();
-    private static readonly Faker _faker = new();
 
-    public static IEndpointRouteBuilder MapRunningJobsEndpoints(this IEndpointRouteBuilder builder)
+    public static IEndpointRouteBuilder MapJobsEndpoints(this IEndpointRouteBuilder builder)
     {
-        builder.MapGet("running-jobs", GetRunningJobs).WithName(nameof(GetRunningJobs));
-        builder.MapPost("running-jobs/run", RunJob).WithName(nameof(RunJob));
+        builder.MapGet("jobs", GetAllJobs).WithName(nameof(GetAllJobs));
+        builder.MapGet("jobs/running", GetRunningJobs).WithName(nameof(GetRunningJobs));
+        builder.MapPost("jobs/run/{jobId}", RunJob).WithName(nameof(RunJob));
         return builder;
     }
 
-    public static async Task<IResult> GetAllJobs()
-    {
-        int numJobs = _random.Next(25, 50);
-        return Results.Ok(from _ in Enumerable.Range(0, numJobs) select new JobDto { Id = Guid.NewGuid(), Name = string.Join(" ", _faker.Lorem.Words(5)) });
-    }
+    public static async Task<IResult> GetAllJobs(
+        IJobsService runningJobsService,
+        CancellationToken cancellationToken = default) => Results.Ok(from j in await runningJobsService.GetJobs(cancellationToken) select new JobDto { Id = j.Id, Name = j.Name });
 
     public static async Task<IResult> GetRunningJobs(
         HttpContext httpContext,
-        IRunningJobsService runningJobsService,
+        IJobsService runningJobsService,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(runningJobsService, nameof(runningJobsService));
@@ -44,7 +40,7 @@ public static class RunningJobsEndpoints
 
     public static async Task<IResult> RunJob(
         Guid jobId,
-        IRunningJobsService runningJobsService,
+        IJobsService runningJobsService,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(runningJobsService, nameof(runningJobsService));
@@ -55,9 +51,7 @@ public static class RunningJobsEndpoints
         }
         try
         {
-            // Simulate long-running job.
-            int runtime = _random.Next(10, 30) * 1000;
-            await Task.Delay(runtime, cancellationToken);
+            await runningJobsService.RunJobAsync(jobId, cancellationToken);
             return Results.Ok();
         }
         finally

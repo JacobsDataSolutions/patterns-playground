@@ -3,8 +3,6 @@
 
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using JDS.PollingDashboard1.Abstractions.Clock;
-using JDS.PollingDashboard1.Abstractions.RunningJobs;
 
 namespace JDS.PollingDashboard1.WebApi;
 

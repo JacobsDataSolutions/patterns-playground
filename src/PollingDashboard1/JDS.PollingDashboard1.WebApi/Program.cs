@@ -3,7 +3,7 @@
 
 using JDS.PollingDashboard1.Services;
 using JDS.PollingDashboard1.WebApi;
-using JDS.PollingDashboard1.WebApi.RunningJobs;
+using JDS.PollingDashboard1.WebApi.Jobs;
 
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 
@@ -37,6 +37,6 @@ app.UseHttpsRedirection();
 
 RouteGroupBuilder routeGroupBuilder = app.MapGroup("api");
 
-routeGroupBuilder.MapRunningJobsEndpoints();
+routeGroupBuilder.MapJobsEndpoints();
 
 await app.RunAsync();
