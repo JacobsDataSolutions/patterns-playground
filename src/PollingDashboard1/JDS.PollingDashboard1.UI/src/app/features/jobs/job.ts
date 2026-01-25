@@ -3,4 +3,5 @@ export interface Job {
   name: string;
   number: number;
   lastRunUtc?: string;
+  lastFinishedUtc?: string;
 }

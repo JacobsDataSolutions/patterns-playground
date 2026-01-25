@@ -12,4 +12,6 @@ public sealed class JobDto
     public required string Name { get; init; }
 
     public DateTime? LastRunUtc { get; init; }
+
+    public DateTime? LastFinishedUtc { get; init; }
 }

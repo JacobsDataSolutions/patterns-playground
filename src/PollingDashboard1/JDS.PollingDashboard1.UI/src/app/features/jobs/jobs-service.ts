@@ -18,6 +18,7 @@ export class JobsService extends BaseComponent {
 
   private readonly jobsSubject$ = new BehaviorSubject<Job[]>([]);
   private readonly runningJobsSubject$ = new BehaviorSubject<RunningJob[]>([]);
+  private readonly serverLocalTimeSubject$ = new BehaviorSubject<string>('');
 
   private lastETag: string | null = null;
   private lastServerNowUtcMs: number | null = null;
@@ -34,25 +35,28 @@ export class JobsService extends BaseComponent {
     return this.lastServerNowUtcMs;
   }
 
+  get serverLocalTime(): Observable<string> {
+    return this.serverLocalTimeSubject$.asObservable();
+  }
+
   runJob(jobId: string): Observable<Job> {
     this.markRunningOptimistic(jobId);
     return this.httpClient.post<Job>(`${this.baseWebApiUrl}/jobs/run/${encodeURIComponent(jobId)}`, {})
       .pipe(
-        takeUntilDestroyed(this.destroyRef),
         catchError(err => {
           if (err?.status === 409) {
             console.log(`Job ${jobId} is already running.`);
-            return null;
+            return EMPTY;
           }
           this.clearRunningOptimistic(jobId);
           console.error(`Error running job ${jobId}!`, err);
-          return null;
+          return EMPTY;
         })
     );
   }
 
   startPolling(intervalMs = 5000): void {
-    timer(0, intervalMs)
+    timer(intervalMs, intervalMs)
       .pipe(
         takeUntilDestroyed(this.destroyRef),
         switchMap(() => this.fetchOnce())
@@ -62,7 +66,6 @@ export class JobsService extends BaseComponent {
   refreshJobs(): Observable<void> {
     return this.getAllJobs()
       .pipe(
-        takeUntilDestroyed(this.destroyRef),
         tap(jobs => this.jobsSubject$.next(jobs)),
         map(j => undefined)
       );
@@ -94,6 +97,9 @@ export class JobsService extends BaseComponent {
     return this.getRunningJobs()
       .pipe(
         tap((resp: HttpResponse<RunningJobs>) => {
+          if (resp.status === 304) {
+            return;
+          }
           const eTag = resp.headers.get('ETag');
           if (eTag?.length) {
             this.lastETag = eTag;
@@ -102,10 +108,8 @@ export class JobsService extends BaseComponent {
             const ms = Date.parse(resp.body.serverTimeUtc);
             if (!Number.isNaN(ms)) {
               this.lastServerNowUtcMs = ms;
+              this.serverLocalTimeSubject$.next(new Date(ms).toString());
             }
-          }
-          if (resp.status === 304) {
-            return;
           }
           const runningJobs = resp.body?.runningJobs?.length ? resp.body.runningJobs : [];
           this.runningJobsSubject$.next(runningJobs);

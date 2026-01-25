@@ -1,5 +1,5 @@
 @if (isRunning) {
-  <p-progress-spinner strokeWidth="4" />
+  <p-progress-spinner strokeWidth="4" [style]="{ width: '30px', height: '30px' }" />
 } @else {
   <p-button label="Run" (onClick)="onClicked()" size="small" />
 }

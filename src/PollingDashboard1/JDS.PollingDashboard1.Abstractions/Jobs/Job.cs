@@ -3,4 +3,4 @@
 
 namespace JDS.PollingDashboard1.Abstractions.Jobs;
 
-public sealed record class Job(Guid Id, string Name, int Number, DateTime? LastRunUtc);
+public sealed record class Job(Guid Id, string Name, int Number, DateTime? LastRunUtc, DateTime? LastFinishedUtc);

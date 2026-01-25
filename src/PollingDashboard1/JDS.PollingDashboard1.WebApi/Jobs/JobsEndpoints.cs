@@ -19,7 +19,7 @@ public static class JobsEndpoints
 
     public static async Task<IResult> GetAllJobs(
         IJobsService runningJobsService,
-        CancellationToken cancellationToken = default) => Results.Ok(from j in await runningJobsService.GetJobs(cancellationToken) select new JobDto { Id = j.Id, Name = j.Name, Number = j.Number, LastRunUtc = j.LastRunUtc });
+        CancellationToken cancellationToken = default) => Results.Ok(from j in await runningJobsService.GetJobs(cancellationToken) select new JobDto { Id = j.Id, Name = j.Name, Number = j.Number, LastRunUtc = j.LastRunUtc, LastFinishedUtc = j.LastFinishedUtc });
 
     public static async Task<IResult> GetRunningJobs(
         HttpContext httpContext,
@@ -50,14 +50,7 @@ public static class JobsEndpoints
         {
             return Results.Conflict(new AlreadyRunningDto { Message = $"Job {jobId} is already running.", AlreadyRunningSinceUtc = (DateTime)alreadyRunningSinceUtc! });
         }
-        try
-        {
-            Job updatedJob = await runningJobsService.RunJobAsync(jobId, cancellationToken);
-            return Results.Ok(new JobDto { Id = updatedJob.Id, Name = updatedJob.Name, Number = updatedJob.Number, LastRunUtc = updatedJob.LastRunUtc });
-        }
-        finally
-        {
-            await runningJobsService.ClearJobRunningAsync(jobId, cancellationToken);
-        }
+        Job updatedJob = await runningJobsService.RunJobAsync(jobId, cancellationToken);
+        return Results.Ok(new JobDto { Id = updatedJob.Id, Name = updatedJob.Name, Number = updatedJob.Number, LastRunUtc = updatedJob.LastRunUtc, LastFinishedUtc = updatedJob.LastFinishedUtc });
     }
 }

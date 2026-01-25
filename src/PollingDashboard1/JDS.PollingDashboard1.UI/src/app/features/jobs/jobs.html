@@ -7,13 +7,14 @@
          [rowsPerPageOptions]="[10, 20, 50]"
          [scrollable]="false"
          size="small"
-         [value]="(jobs$ | async)!"
-         >
+         [value]="(jobs$ | async)!">
   <ng-template pTemplate="header">
     <tr>
       <th>Job #</th>
       <th>Job Name</th>
       <th>ID</th>
+      <th>Last Run</th>
+      <th>Last Finished</th>
       <th></th>
     </tr>
   </ng-template>
@@ -22,7 +23,13 @@
       <td>{{ job.number }}</td>
       <td>{{ job.name }}</td>
       <td>{{ job.id }}</td>
-      <td><jds-progress-button (buttonClicked)="buttonClicked(job.id)" /></td>
+      <td>{{ formatDateTime(job.lastRunUtc) }}</td>
+      <td>{{ formatDateTime(job.lastFinishedUtc) }}</td>
+      <td><jds-progress-button (buttonClicked)="buttonClicked(job.id)" [isRunning]="isRunning(job.id)" [pTooltip]="(tooltips$ | async)?.get(job.id) ?? ''" /></td>
     </tr>
   </ng-template>
 </p-table>
+<br />
+<div class="server-time">
+  Last Server Time: {{ serverDateTime | async }}
+</div>

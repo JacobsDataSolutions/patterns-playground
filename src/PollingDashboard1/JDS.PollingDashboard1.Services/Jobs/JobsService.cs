@@ -1,6 +1,7 @@
 ﻿// Copyright (c) 2026 Jacobs Data Solutions, LLC
 // Licensed under the MIT License. See LICENSE file in the project root.
 
+using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -17,7 +18,7 @@ internal sealed class JobsService : IJobsService, IDisposable
 
     private static readonly Random _random = new();
     private static readonly Faker _faker = new();
-    private static readonly Dictionary<Guid, Job> _jobs;
+    private static readonly ConcurrentDictionary<Guid, Job> _jobs;
 
     private readonly IDistributedCache _cache;
     private readonly JsonSerializerOptions _jsonSerializerOptions;
@@ -30,7 +31,7 @@ internal sealed class JobsService : IJobsService, IDisposable
     static JobsService()
     {
         int numJobs = _random.Next(25, 50);
-        _jobs = (from n in Enumerable.Range(0, numJobs) select new Job(Guid.NewGuid(), string.Join(" ", $"{_faker.Lorem.Sentence(_random.Next(3, 5))}"), n, null)).ToDictionary(x => x.Id);
+        _jobs = new ConcurrentDictionary<Guid, Job>((from n in Enumerable.Range(0, numJobs) select new Job(Guid.NewGuid(), string.Join(" ", $"{_faker.Lorem.Sentence(_random.Next(3, 5))}"), n, null, null)).ToDictionary(x => x.Id));
     }
 
     public JobsService(IDistributedCache cache, JsonSerializerOptions jsonSerializerOptions, IDateTimeService dateTimeService, TimeSpan? ttl = null)
@@ -47,7 +48,7 @@ internal sealed class JobsService : IJobsService, IDisposable
         };
     }
 
-    public async Task<IReadOnlyList<Job>> GetJobs(CancellationToken cancellationToken = default) => _jobs.Values.ToList();
+    public async Task<IReadOnlyList<Job>> GetJobs(CancellationToken cancellationToken = default) => [.. _jobs.Values.OrderBy(x => x.Number)];
 
     public async Task<Job> RunJobAsync(Guid jobId, CancellationToken cancellationToken = default)
     {
@@ -55,8 +56,14 @@ internal sealed class JobsService : IJobsService, IDisposable
         _jobs[jobId] = updatedJob;
 
         // Simulate long-running job.
-        int runtime = _random.Next(10, 30) * 1000;
-        await Task.Delay(runtime, cancellationToken);
+        Task.Run(async () =>
+        {
+            int runtime = _random.Next(10, 30) * 1000;
+            Thread.Sleep(runtime);
+            updatedJob = _jobs[jobId] with { LastFinishedUtc = _dateTimeService.UtcNow };
+            _jobs[jobId] = updatedJob;
+            await ClearJobRunningAsync(jobId, cancellationToken);
+        });
 
         return updatedJob;
     }

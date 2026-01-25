@@ -1,4 +1,4 @@
-import { Component, OnInit, ViewChild, inject } from '@angular/core';
+import { Component, DestroyRef, OnInit, ViewChild, inject } from '@angular/core';
 import { Table, TableModule } from 'primeng/table';
 import { JobsService } from './jobs-service';
 import { Job } from './job';
@@ -6,38 +6,84 @@ import { AsyncPipe } from '@angular/common';
 import { ProgressButton } from '../../shared/progress-button/progress-button';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { RunningJob } from './running-job';
-import { map } from 'rxjs';
+import { Observable, combineLatest, map, tap, timer } from 'rxjs';
+import { TooltipModule } from 'primeng/tooltip';
+import { formatDateTime } from '../../shared/util';
 
 @Component({
   selector: 'jds-jobs',
-  imports: [TableModule, AsyncPipe, ProgressButton],
+  imports: [TableModule, AsyncPipe, ProgressButton, TooltipModule],
   templateUrl: './jobs.html',
   styleUrl: './jobs.scss',
 })
 export class Jobs implements OnInit {
+  private readonly refreshWhenRunningListChanges = true;
+
   @ViewChild(Table) table!: Table<Job>;
   private readonly jobsService = inject(JobsService);
   private runningJobs = new Map<string, number>();
+  private destroyRef = inject(DestroyRef);
+
+  private now$ = timer(1000, 1000).pipe(
+    takeUntilDestroyed(this.destroyRef),
+    map(() => Date.now())
+  );
 
   jobs$ = this.jobsService.jobs$
 
+  formatDateTime = formatDateTime;
+
+  tooltips$ = combineLatest([this.jobsService.runningJobs$, this.now$]).pipe(
+    map(([running, now]) => {
+      const m = new Map<string, string>();
+      for (const job of running) {
+        m.set(job.jobId, job.kickedOffUtc?.length ? this.formatElapsed(now - Date.parse(job.kickedOffUtc)) : '');
+      }
+      return m;
+    })
+  );
+
+  get serverDateTime(): Observable<string> {
+    return this.jobsService.serverLocalTime;
+  }
+
   ngOnInit(): void {
-    this.jobsService.refreshJobs().subscribe(() => {
-      console.log('Jobs list loaded.');
-      this.jobsService.startPolling();
-    });
+    this.jobsService.startPolling();
+
+    if (!this.refreshWhenRunningListChanges) {
+      this.jobsService.refreshJobs()
+        .pipe(
+          takeUntilDestroyed(this.destroyRef)
+        ).subscribe(() => {
+          console.log('Jobs list loaded.');
+        });
+    }
+
     this.jobsService.runningJobs$
       .pipe(
-        takeUntilDestroyed(),
+        takeUntilDestroyed(this.destroyRef),
         map(jobs => this.toRunningJobsMap(jobs))
       )
       .subscribe(map => {
         this.runningJobs = map;
+        if (this.refreshWhenRunningListChanges) {
+          this.jobsService.refreshJobs()
+            .pipe(
+              takeUntilDestroyed(this.destroyRef)
+            ).subscribe(() => {
+              console.log('Jobs list re-loaded.');
+            });
+        }
       });
   }
 
   buttonClicked(jobId: string): void {
-    this.jobsService.runJob(jobId);
+    this.jobsService.runJob(jobId)
+      .pipe(
+        takeUntilDestroyed(this.destroyRef),
+      ).subscribe(job => {
+        console.log(`Job ${job.id} kicked off.`);
+      });
   }
 
   isRunning(jobId: string): boolean {
@@ -48,13 +94,8 @@ export class Jobs implements OnInit {
     return this.runningJobs.get(jobId) ?? null;
   }
 
-  formatElaspsed(jobId: string): string {
-    const kicked = this.kickedOffMs(jobId);
-    if (!kicked) {
-      return '';
-    }
-    const now = Date.now();
-    const seconds = Math.max(0, Math.floor((now - kicked) / 1000));
+  formatElapsed(ms: number): string {
+    const seconds = Math.max(0, Math.floor(ms / 1000));
     const m = Math.floor(seconds / 60);
     const s = seconds % 60;
     return 'Running for ' + (m > 0 ? `${m}m ${s}s` : `${s}s`);
