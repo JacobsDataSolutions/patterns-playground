@@ -7,5 +7,5 @@ public interface IJobsService
     Task ClearJobRunningAsync(Guid jobId, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<Job>> GetJobs(CancellationToken cancellationToken = default);
     Task<RunningJobsList> GetRunningJobsListAsync(CancellationToken cancellationToken = default);
-    Task RunJobAsync(Guid jobId, CancellationToken cancellationToken = default);
+    Task<Job> RunJobAsync(Guid jobId, CancellationToken cancellationToken = default);
 }

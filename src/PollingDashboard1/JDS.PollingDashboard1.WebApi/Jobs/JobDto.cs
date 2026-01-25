@@ -5,7 +5,11 @@ namespace JDS.PollingDashboard1.WebApi.Jobs;
 
 public sealed class JobDto
 {
+    public int Number { get; init; }
+
     public Guid Id { get; init; }
 
     public required string Name { get; init; }
+
+    public DateTime? LastRunUtc { get; init; }
 }

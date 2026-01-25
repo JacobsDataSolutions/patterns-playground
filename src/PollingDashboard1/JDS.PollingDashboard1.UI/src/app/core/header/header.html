@@ -1,0 +1,8 @@
+<header class="header">
+  <div class="header-text">
+    <h2><ng-content /></h2>
+  </div>
+  <div class="theme-select">
+    <p-select [options]="themes" [(ngModel)]="selectedTheme" optionLabel="name" (onChange)="onChange()" />
+  </div>
+</header>

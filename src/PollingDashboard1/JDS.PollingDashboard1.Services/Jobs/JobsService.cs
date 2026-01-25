@@ -17,6 +17,7 @@ internal sealed class JobsService : IJobsService, IDisposable
 
     private static readonly Random _random = new();
     private static readonly Faker _faker = new();
+    private static readonly Dictionary<Guid, Job> _jobs;
 
     private readonly IDistributedCache _cache;
     private readonly JsonSerializerOptions _jsonSerializerOptions;
@@ -25,6 +26,12 @@ internal sealed class JobsService : IJobsService, IDisposable
 
     private readonly SemaphoreSlim _semaphore = new(1, 1);
     private bool isDisposed;
+
+    static JobsService()
+    {
+        int numJobs = _random.Next(25, 50);
+        _jobs = (from n in Enumerable.Range(0, numJobs) select new Job(Guid.NewGuid(), string.Join(" ", $"{_faker.Lorem.Sentence(_random.Next(3, 5))}"), n, null)).ToDictionary(x => x.Id);
+    }
 
     public JobsService(IDistributedCache cache, JsonSerializerOptions jsonSerializerOptions, IDateTimeService dateTimeService, TimeSpan? ttl = null)
     {
@@ -40,17 +47,18 @@ internal sealed class JobsService : IJobsService, IDisposable
         };
     }
 
-    public async Task<IReadOnlyList<Job>> GetJobs(CancellationToken cancellationToken = default)
-    {
-        int numJobs = _random.Next(25, 50);
-        return [.. from _ in Enumerable.Range(0, numJobs) select new Job(Guid.NewGuid(), string.Join(" ", $"{_faker.Lorem.Sentence(_random.Next(3, 5))}"))];
-    }
+    public async Task<IReadOnlyList<Job>> GetJobs(CancellationToken cancellationToken = default) => _jobs.Values.ToList();
 
-    public async Task RunJobAsync(Guid jobId, CancellationToken cancellationToken = default)
+    public async Task<Job> RunJobAsync(Guid jobId, CancellationToken cancellationToken = default)
     {
+        Job updatedJob = _jobs[jobId] with { LastRunUtc = _dateTimeService.UtcNow };
+        _jobs[jobId] = updatedJob;
+
         // Simulate long-running job.
         int runtime = _random.Next(10, 30) * 1000;
         await Task.Delay(runtime, cancellationToken);
+
+        return updatedJob;
     }
 
     public async Task<AttemptRetryResult> AttemptJobRunAsync(Guid jobId, CancellationToken cancellationToken = default)
@@ -104,10 +112,9 @@ internal sealed class JobsService : IJobsService, IDisposable
         {
             Dictionary<Guid, DateTime> runningJobMap = await GetRunningJobMapFromCacheAsync(cancellationToken);
             RunningJob[] jobs =
-                runningJobMap
+                [.. runningJobMap
                 .OrderBy(job => job.Key)
-                .Select(job => new RunningJob(job.Key, job.Value))
-                .ToArray();
+                .Select(job => new RunningJob(job.Key, job.Value))];
             string eTagSource = string.Join("|", from j in jobs select $"{j.JobId}:{j.KickedOffUtc.Ticks}");
             string eTag = ComputeStrongETag(eTagSource);
             return new(jobs, eTag, _dateTimeService.UtcNow);

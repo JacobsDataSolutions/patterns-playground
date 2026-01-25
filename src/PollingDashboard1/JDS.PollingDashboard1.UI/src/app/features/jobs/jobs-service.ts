@@ -1,9 +1,9 @@
 import { DestroyRef, Injectable, inject } from '@angular/core';
 import { BaseComponent } from '../../core/base-component/base-component';
 import { WEB_API_URL } from '../../tokens';
-import { BehaviorSubject, EMPTY, Observable, catchError, ignoreElements, switchMap, tap, timer } from 'rxjs';
+import { BehaviorSubject, EMPTY, Observable, catchError, ignoreElements, switchMap, tap, timer, map } from 'rxjs';
 import { Job } from './job';
-import { HttpClient, HttpResponse } from '@angular/common/http';
+import { HttpClient, HttpErrorResponse, HttpResponse } from '@angular/common/http';
 import { RunningJobs } from './running-jobs';
 import { RunningJob } from './running-job';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
@@ -16,13 +16,14 @@ export class JobsService extends BaseComponent {
   private readonly baseWebApiUrl = `${inject(WEB_API_URL)}/api`;
   private readonly destroyRef = inject(DestroyRef);
 
+  private readonly jobsSubject$ = new BehaviorSubject<Job[]>([]);
   private readonly runningJobsSubject$ = new BehaviorSubject<RunningJob[]>([]);
 
   private lastETag: string | null = null;
   private lastServerNowUtcMs: number | null = null;
 
   get jobs$(): Observable<Job[]> {
-    return this.getAllJobs();
+    return this.jobsSubject$.asObservable();
   }
 
   get runningJobs$(): Observable<RunningJob[]> {
@@ -33,8 +34,21 @@ export class JobsService extends BaseComponent {
     return this.lastServerNowUtcMs;
   }
 
-  runJob(jobId: string): Observable<void> {
-    return this.httpClient.post<void>(`${this.baseWebApiUrl}/jobs/run/${encodeURIComponent(jobId)}`, {});
+  runJob(jobId: string): Observable<Job> {
+    this.markRunningOptimistic(jobId);
+    return this.httpClient.post<Job>(`${this.baseWebApiUrl}/jobs/run/${encodeURIComponent(jobId)}`, {})
+      .pipe(
+        takeUntilDestroyed(this.destroyRef),
+        catchError(err => {
+          if (err?.status === 409) {
+            console.log(`Job ${jobId} is already running.`);
+            return null;
+          }
+          this.clearRunningOptimistic(jobId);
+          console.error(`Error running job ${jobId}!`, err);
+          return null;
+        })
+    );
   }
 
   startPolling(intervalMs = 5000): void {
@@ -45,7 +59,16 @@ export class JobsService extends BaseComponent {
     ).subscribe();
   }
 
-  markRunningOptimistic(jobId: string, kickedOffUtcIsoString = new Date().toISOString()): void {
+  refreshJobs(): Observable<void> {
+    return this.getAllJobs()
+      .pipe(
+        takeUntilDestroyed(this.destroyRef),
+        tap(jobs => this.jobsSubject$.next(jobs)),
+        map(j => undefined)
+      );
+  }
+
+  private markRunningOptimistic(jobId: string, kickedOffUtcIsoString = new Date().toISOString()): void {
     const current = this.runningJobsSubject$.value;
     const next = current.some(j => j.jobId === jobId) ?
       current.map(j => j.jobId === jobId ? { ...j, kickedOffUtc: kickedOffUtcIsoString } : j) :
@@ -53,7 +76,7 @@ export class JobsService extends BaseComponent {
     this.runningJobsSubject$.next(next);
   }
 
-  clearRunningOptimistic(jobId: string): void {
+  private clearRunningOptimistic(jobId: string): void {
     const next = this.runningJobsSubject$.value.filter(j => j.jobId !== jobId);
     this.runningJobsSubject$.next(next);
   }
@@ -67,7 +90,7 @@ export class JobsService extends BaseComponent {
     return this.httpClient.get<RunningJobs>(`${this.baseWebApiUrl}/jobs/running`, { observe: 'response', headers });
   }
 
-  private fetchOnce(): Observable<never> {
+  private fetchOnce(): Observable<void> {
     return this.getRunningJobs()
       .pipe(
         tap((resp: HttpResponse<RunningJobs>) => {
@@ -89,6 +112,13 @@ export class JobsService extends BaseComponent {
         }),
         ignoreElements(),
         catchError(err => {
+          if (err instanceof HttpErrorResponse && err.status === 304) {
+            const eTag = err.headers?.get('ETag');
+            if (eTag?.length) {
+              this.lastETag = eTag;
+            }
+            return EMPTY;
+          }
           console.error('Querying running jobs failed!', err);
           return EMPTY;
         })

@@ -19,7 +19,7 @@ public static class JobsEndpoints
 
     public static async Task<IResult> GetAllJobs(
         IJobsService runningJobsService,
-        CancellationToken cancellationToken = default) => Results.Ok(from j in await runningJobsService.GetJobs(cancellationToken) select new JobDto { Id = j.Id, Name = j.Name });
+        CancellationToken cancellationToken = default) => Results.Ok(from j in await runningJobsService.GetJobs(cancellationToken) select new JobDto { Id = j.Id, Name = j.Name, Number = j.Number, LastRunUtc = j.LastRunUtc });
 
     public static async Task<IResult> GetRunningJobs(
         HttpContext httpContext,
@@ -28,6 +28,7 @@ public static class JobsEndpoints
     {
         ArgumentNullException.ThrowIfNull(runningJobsService, nameof(runningJobsService));
         (IReadOnlyList<RunningJob>? runningJobs, string? eTag, DateTime serverTimeUtc) = await runningJobsService.GetRunningJobsListAsync(cancellationToken);
+        httpContext.Response.Headers.Location = "none";
         httpContext.Response.Headers.CacheControl = "no-store";
         httpContext.Response.Headers.ETag = eTag;
         string ifNoneMatch = httpContext.Request.Headers.IfNoneMatch.ToString();
@@ -51,8 +52,8 @@ public static class JobsEndpoints
         }
         try
         {
-            await runningJobsService.RunJobAsync(jobId, cancellationToken);
-            return Results.Ok();
+            Job updatedJob = await runningJobsService.RunJobAsync(jobId, cancellationToken);
+            return Results.Ok(new JobDto { Id = updatedJob.Id, Name = updatedJob.Name, Number = updatedJob.Number, LastRunUtc = updatedJob.LastRunUtc });
         }
         finally
         {
